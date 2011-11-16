@@ -44,6 +44,10 @@ public class GSODNetCDFGenerator {
 
     private static final short _FillValue_SHORT = -9999;
 
+    private final static String STATION_DIM_NAME = "station";
+    private final static String OBSERVATION_DIM_NAME = "observation";
+    private final static String OBSERVATION_STRUCT_NAME = "record"; // NetCDF-Java reqiures this to be record (las tested release was 4.2.26)
+    
     public static void main(String[] args) {
         String jnaLibraryPath = getProperty("jna.library.path");
         if (jnaLibraryPath == null) {
@@ -130,14 +134,14 @@ public class GSODNetCDFGenerator {
             out.println("Reading op data files and creating NetCDF file(s)...");
 
             List<GSODNetCDFFileBase> gsodList = new ArrayList<GSODNetCDFFileBase>();
-            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.c.cf.nc")), station_count, NC_CLASSIC_MODEL, Convention.CF));
+//            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.c.cf.nc")), station_count, NC_CLASSIC_MODEL, Convention.CF));
 //            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.c.uod.nc")), station_count, NC_CLASSIC_MODEL, Convention.UOD));
 //            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.4c.cf.nc")), station_count, NC_NETCDF4 | NC_CLASSIC_MODEL, Convention.CF));
 //            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.4c.uod.nc")), station_count, NC_NETCDF4 | NC_CLASSIC_MODEL, Convention.UOD));
 //            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.4.cf.nc")), station_count, NC_NETCDF4, Convention.CF));
 //            gsodList.add(new GSODNetCDFFile((new File(netcdfDirectory, "gsod.4.uod.nc")), station_count, NC_NETCDF4, Convention.UOD));
             gsodList.add(new GSODStructureNetCDFFile((new File(netcdfDirectory, "gsod.4s.cf.nc")), station_count, Convention.CF));
-//            gsodList.add(new GSODStructureNetCDFFile((new File(netcdfDirectory, "gsod.4s.uod.nc")), station_count, Convention.UOD));
+            gsodList.add(new GSODStructureNetCDFFile((new File(netcdfDirectory, "gsod.4s.uod.nc")), station_count, Convention.UOD));
 
             int count = gsodList.size();
             for (int index = 0; index < count ; ++index) {
@@ -184,6 +188,8 @@ public class GSODNetCDFGenerator {
         public final String name;
 
         public final int createFlags;
+        
+        public final Convention convention;
 
         public final int ncId;
 
@@ -202,11 +208,13 @@ public class GSODNetCDFGenerator {
         public final int[] station_dimidsp;
         public final int[] station_id_dimidsp;
 
-        GSODNetCDFFileBase(File file, int stationCount, int createFlags) {
+        GSODNetCDFFileBase(File file, int stationCount, int createFlags, Convention convention) {
 
             this.name = file.getName();
             
             this.createFlags = createFlags;
+            
+            this.convention = convention;
 
             int ncStatus;
             IntByReference iRef = new IntByReference();
@@ -215,7 +223,7 @@ public class GSODNetCDFGenerator {
             ncId = iRef.getValue();
 
             // DIMENSIONS
-            ncStatus = nc_def_dim(ncId, "station", new NativeLong(stationCount), iRef); status(ncStatus);
+            ncStatus = nc_def_dim(ncId, STATION_DIM_NAME, new NativeLong(stationCount), iRef); status(ncStatus);
             ncDimId_station = iRef.getValue();
             ncStatus = nc_def_dim(ncId, "station_id_len", new NativeLong(128), iRef); status(ncStatus);
             ncDimId_station_id_len = iRef.getValue();
@@ -226,16 +234,19 @@ public class GSODNetCDFGenerator {
             station_id_dimidsp = new int[] { ncDimId_station, ncDimId_station_id_len };
             ncStatus = nc_def_var(ncId, "lon", NC_FLOAT, station_dimidsp, iRef); status(ncStatus);
             ncVarId_lon = iRef.getValue();
+            ncStatus = nc_put_att_text(ncId, ncVarId_lon, "standard_name", "longitude"); status(ncStatus);
             ncStatus = nc_put_att_text(ncId, ncVarId_lon, "units", "degrees_east"); status(ncStatus);
             ncStatus = nc_put_att_float(ncId, ncVarId_lon, "_FillValue", -999.999f); status(ncStatus);
 
             ncStatus = nc_def_var(ncId, "lat", NC_FLOAT, station_dimidsp, iRef); status(ncStatus);
             ncVarId_lat = iRef.getValue();
+            ncStatus = nc_put_att_text(ncId, ncVarId_lat, "standard_name", "latitude"); status(ncStatus);
             ncStatus = nc_put_att_text(ncId, ncVarId_lat, "units", "degrees_north"); status(ncStatus);
             ncStatus = nc_put_att_float(ncId, ncVarId_lat, "_FillValue", -99.999f); status(ncStatus);
 
             ncStatus = nc_def_var(ncId, "elev", NC_FLOAT, station_dimidsp, iRef); status(ncStatus);
             ncVarId_elev = iRef.getValue();
+            ncStatus = nc_put_att_text(ncId, ncVarId_elev, "standard_name", "height"); status(ncStatus);
             ncStatus = nc_put_att_text(ncId, ncVarId_elev, "units", "ft"); status(ncStatus);
             ncStatus = nc_put_att_text(ncId, ncVarId_elev, "positive", "up"); status(ncStatus);
             ncStatus = nc_put_att_float(ncId, ncVarId_elev, "_FillValue", -99.999f); status(ncStatus);
@@ -250,11 +261,18 @@ public class GSODNetCDFGenerator {
             ncStatus = nc_def_var(ncId, "station_id", NC_CHAR, station_id_dimidsp , iRef); status(ncStatus);
             ncVarId_station_id = iRef.getValue();
             nc_put_att_text(ncId, ncVarId_station_id, "standard_name", "station_id"); status(ncStatus);
-
+            if (convention == Convention.CF) {
+                nc_put_att_text(ncId, ncVarId_station_id, "cf_role", "timeseries_id"); status(ncStatus);
+            }
+            
             ncStatus = nc_def_var(ncId, "numChildren", NC_INT, station_dimidsp , iRef); status(ncStatus);
             ncVarId_numChildren = iRef.getValue();
-            nc_put_att_text(ncId, ncVarId_numChildren, "standard_name", "ragged_row_size"); status(ncStatus);
-
+            if (convention == Convention.CF) {
+                nc_put_att_text(ncId, ncVarId_numChildren, "CF:ragged_row_count", OBSERVATION_DIM_NAME); status(ncStatus);
+                nc_put_att_text(ncId, ncVarId_numChildren, "sample_dimension", OBSERVATION_DIM_NAME); status(ncStatus);
+                nc_put_att_text(ncId, ncVarId_numChildren, "standard_name", "ragged_row_size"); status(ncStatus);
+            }
+            
             ncStatus = nc_def_var(ncId, "firstChild", NC_INT, station_dimidsp , iRef); status(ncStatus);
             ncVarId_firstChild = iRef.getValue();
         }
@@ -298,12 +316,12 @@ public class GSODNetCDFGenerator {
         public final int[] observation_dimidsp;
 
         public GSODNetCDFFile(File file, int stationCount, int createFlags, Convention convention) {
-            super(file, stationCount, createFlags);
+            super(file, stationCount, createFlags, convention);
 
             int ncStatus;
             IntByReference iRef = new IntByReference();
 
-            ncStatus = nc_def_dim(ncId, "observation", new NativeLong(0), iRef); status(ncStatus);
+            ncStatus = nc_def_dim(ncId, OBSERVATION_DIM_NAME, new NativeLong(0), iRef); status(ncStatus);
             ncDimId_observation = iRef.getValue();
 
             //// VARIABLES
@@ -417,13 +435,13 @@ public class GSODNetCDFGenerator {
             
             // GLOBAL ATTRIBUTES
             if (convention == Convention.CF) {
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "Conventions", "CF-1.5"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "CF:featureType", "stationTimeSeries"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "Conventions", "CF-1.6"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "CF:featureType", "timeSeries"); status(ncStatus);
             } else {
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "Conventions", "Unidata Observation Dataset v1.0"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "cdm_datatype", "Station"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "stationDimension", "station"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "observationDimension", "record"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "stationDimension", STATION_DIM_NAME); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "observationDimension", OBSERVATION_DIM_NAME); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "cdm_datatype", "STATION"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "latitude_coordinate", "lat"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "longitude_coordinate", "lon"); status(ncStatus);
@@ -527,18 +545,18 @@ public class GSODNetCDFGenerator {
         public final int[] record_dimidsp;
 
         public GSODStructureNetCDFFile(File file, int stationCount, Convention convention ) {
-            super(file, stationCount, NC_NETCDF4);
+            super(file, stationCount, NC_NETCDF4, convention);
 
             int ncStatus;
             IntByReference iRef = new IntByReference();
 
 
-            ncStatus = nc_def_dim(ncId, "record", new NativeLong(0), iRef); status(ncStatus);
+            ncStatus = nc_def_dim(ncId, OBSERVATION_DIM_NAME, new NativeLong(0), iRef); status(ncStatus);
             ncDimId_record = iRef.getValue();
 
             //// VARIABLES
             // OBSERVATION
-            ncStatus = nc_def_compound(ncId, new NativeLong(27), "record_type", iRef); status(ncStatus);
+            ncStatus = nc_def_compound(ncId, new NativeLong(27), OBSERVATION_STRUCT_NAME + "_type", iRef); status(ncStatus);
             ncTypeId_record_type = iRef.getValue();
             ncStatus = nc_insert_compound(ncId, ncTypeId_record_type, "time"  , new NativeLong(0) , NC_SHORT); status(ncStatus);
             ncStatus = nc_insert_compound(ncId, ncTypeId_record_type, "temp"  , new NativeLong(2) , NC_SHORT); status(ncStatus);
@@ -556,49 +574,54 @@ public class GSODNetCDFGenerator {
             ncStatus = nc_insert_compound(ncId, ncTypeId_record_type, "frshtt", new NativeLong(26), NC_UBYTE); status(ncStatus);
 
             record_dimidsp = new int[] { ncDimId_record };
-            ncStatus = nc_def_var(ncId, "record", ncTypeId_record_type, record_dimidsp , iRef); status(ncStatus);
+            ncStatus = nc_def_var(ncId, OBSERVATION_STRUCT_NAME, ncTypeId_record_type, record_dimidsp , iRef); status(ncStatus);
             ncVarId_record = iRef.getValue();
 
-            ncStatus = nc_put_att_text(ncId, ncVarId_record, "coordinates", "record.time lon lat elev");
+            ncStatus = nc_put_att_text(ncId, ncVarId_record, "coordinates", OBSERVATION_STRUCT_NAME + ".time lon lat elev");
 
-            generateCompoundAttributes(ncId, ncVarId_record, "record_units_type", "units",
+            generateCompoundAttributes(ncId, ncVarId_record, OBSERVATION_STRUCT_NAME + "_units_type", "units",
                     new String[] {"time","temp","dewp","slp","stp","visib","wdsp","mxspd","gust","max","min","prcp","sndp"},
                     new String[] {"days since 1929-01-01 00:00:00","degF","degF","mbar","mbar","miles","knots","knots","knots","degF","degF","inches","inches"}
             );
 
-            generateCompoundAttributes(ncId, ncVarId_record, "record_scale_factor_type", "scale_factor",
+            generateCompoundAttributes(ncId, ncVarId_record, OBSERVATION_STRUCT_NAME + "_scale_factor_type", "scale_factor",
                     new String[] {"temp","dewp","slp","stp","visib","wdsp","mxspd","gust","max","min","prcp","sndp"},
                     new float[] {0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.01f, 0.1f}
             );
-            generateCompoundAttributes(ncId, ncVarId_record, "record_add_offset_type", "add_offset",
+            generateCompoundAttributes(ncId, ncVarId_record, OBSERVATION_STRUCT_NAME + "_add_offset_type", "add_offset",
                     new String[] {"temp","dewp","slp","stp","visib","wdsp","mxspd","gust","max","min","prcp","sndp"},
                     new float[] {0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f}
             );
-//            generateCompoundAttributes(ncId, ncVarId_record, "record__FillValue_type", _FillValue,
+//            generateCompoundAttributes(ncId, ncVarId_record, OBSERVATION_STRUCT_NAME + "__FillValue_type", _FillValue,
 //                    new String[] {"temp","dewp","slp","stp","visib","wdsp","mxspd","gust","max","min","prcp","sndp"},
 //                    new short[] {_FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT}
 //            );
-            generateCompoundAttributes(ncId, ncVarId_record, "record_missing_value_type", "missing_value",
+            generateCompoundAttributes(ncId, ncVarId_record, OBSERVATION_STRUCT_NAME + "_missing_value_type", "missing_value",
                     new String[] {"temp","dewp","slp","stp","visib","wdsp","mxspd","gust","max","min","prcp","sndp"},
                     new short[] {_FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT, _FillValue_SHORT}
+            );
+            
+            generateCompoundAttributes(ncId, ncVarId_record, OBSERVATION_STRUCT_NAME + "_standard_name_type", "standard_name",
+                    new String[] {"time" },
+                    new String[] {"time" }
             );
 
             ncStatus = nc_def_var_chunking(ncId, ncVarId_record, NC_CHUNKED, new NativeLong[] { new NativeLong(27) }); status(ncStatus);
 
             // GLOBAL ATTRIBUTES
             if (convention == Convention.CF) {
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "Conventions", "CF-1.5"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "CF:featureType", "stationTimeSeries"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "Conventions", "CF-1.6"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "CF:featureType", "timeSeries"); status(ncStatus);
             } else {
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "Conventions", "Unidata Observation Dataset v1.0"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "cdm_datatype", "Station"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "stationDimension", "station"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "observationDimension", "record"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "stationDimension", STATION_DIM_NAME); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "observationDimension", OBSERVATION_DIM_NAME); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "cdm_datatype", "STATION"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "latitude_coordinate", "lat"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "longitude_coordinate", "lon"); status(ncStatus);
                 ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "zaxis_coordinate", "elev"); status(ncStatus);
-                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "time_coordinate", "record.time"); status(ncStatus);
+                ncStatus = nc_put_att_text(ncId, NC_GLOBAL, "time_coordinate", OBSERVATION_STRUCT_NAME + ".time"); status(ncStatus);
             }
 
             ncStatus = nc_enddef(ncId); status(ncStatus);
